@@ -13,7 +13,7 @@ Validated on the [N-BaIoT dataset](https://www.kaggle.com/datasets/mkashifn/nbai
 
 ## How it works
 
-Each device gets its own baseline — mean and variance per feature, updated online using Welford's algorithm. Every tick, BICE computes a Z-score for each feature against that device's own history, takes the mean absolute Z-score across all features, and compares it to a threshold θ.
+Each device gets its own baseline, mean and variance per feature, updated online using Welford's algorithm. Every tick, BICE computes a Z-score for each feature against that device's own history, takes the mean absolute Z-score across all features, and compares it to a threshold θ.
 
 ```
 drift Δ = mean(|z_i|) for all features i
@@ -37,7 +37,7 @@ Baseline updates are gated — if a device is in alert state, its baseline freez
 **Requirements:** Python 3.10+, uvicorn, fastapi
 
 ```bash
-git clone https://github.com/yourname/bice
+git clone https://github.com/sunandithabs/bice
 cd bice
 pip install -r requirements.txt
 ```
