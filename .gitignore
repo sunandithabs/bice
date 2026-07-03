@@ -25,3 +25,24 @@ results/*.db
 results/*.db
 datasets/
 selected_dataset/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated outputs
+results/*.db
+*.sqlite*
+*.log
+
+# Large datasets (keep only small samples if needed)
+datasets/
+selected_dataset/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
