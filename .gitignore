@@ -1,1 +1,27 @@
-bice.db
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+
+# VS Code
+.vscode/
+
+# Databases
+*.db
+*.sqlite*
+results/*.db
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Generated outputs
+results/*.db
+datasets/
+selected_dataset/
