@@ -1,6 +1,15 @@
-pkill -f "uvicorn main:app"
+#!/usr/bin/env bash
+# Usage: BICE_DATASET_PATH=/path/to/dataset ./scripts/run_eval.sh
+# Run from the project root (the "bice" folder), or this script will cd there itself.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+: "${BICE_DATASET_PATH:?Set BICE_DATASET_PATH to your N-BaIoT dataset folder}"
+
+pkill -f "uvicorn engine.main:app" || true
 sleep 2
-cd ~/projects/bice && BICE_DATASET_PATH=/home/smtx724/Downloads/archive python3 -m uvicorn main:app --port 8000 &
+cd "$PROJECT_ROOT" && BICE_DATASET_PATH="$BICE_DATASET_PATH" python3 -m uvicorn engine.main:app --port 8000 &
 sleep 120 && python3 test_metrics.py && curl -s http://127.0.0.1:8000/api/state | python3 -c "
 import sys,json,statistics
 assets=[a for a in json.load(sys.stdin).get('assets',[]) if a]

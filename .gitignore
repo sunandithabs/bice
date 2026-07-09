@@ -2,38 +2,22 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.egg-info/
+.pytest_cache/
 
 # Virtual environments
 venv/
 .venv/
 
+# Env / secrets
+.env
+
 # VS Code
 .vscode/
 
-# Databases
+# Databases / generated outputs
+results/
 *.db
-*.sqlite*
-results/*.db
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-
-# Generated outputs
-results/*.db
-datasets/
-selected_dataset/
-
-# Python
-venv/
-.venv/
-__pycache__/
-*.py[cod]
-
-# Generated outputs
-results/*.db
 *.sqlite*
 *.log
 
@@ -41,8 +25,6 @@ results/*.db
 datasets/
 selected_dataset/
 
-# VS Code
-.vscode/
-
-# OS files
+# OS
 .DS_Store
+

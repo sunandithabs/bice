@@ -220,7 +220,19 @@ class DatasetDevice:
         "HpHp_L0.01_pcc": "HpHp L0.01 PCC",
     }
 
-    def __init__(self, name, feature_names, row_source=None, row_file_path=None, label_key="label", benign_labels=None, default_attacked=None, theta=3.0):
+    # Number of leading rows discarded from every CSV before any of its data is
+    # allowed to enter history/baseline/evaluation. N-BaIoT's Kitsune-derived
+    # features are exponentially-decayed incremental statistics (MI/H/HH/HpHp
+    # at lambda = 5, 3, 1, 0.1, 0.01). The slow channels (L0.1, especially
+    # L0.01) have a long time-constant (~1/lambda packets) and start at zero,
+    # so the first rows of *every* capture -- benign and attack alike -- are
+    # still transient/converging rather than representative steady-state
+    # behavior. Discarding a fixed burn-in prefix (applied identically to all
+    # devices/labels) prevents that cold-start artifact from being read as
+    # either "normal baseline" or "anomalous drift".
+    BURN_IN_ROWS = 60
+
+    def __init__(self, name, feature_names, row_source=None, row_file_path=None, label_key="label", benign_labels=None, default_attacked=None, theta=3.0, baseline_source=None):
         self.name = name
         self.feature_names = feature_names
         self.row_source = row_source
@@ -228,20 +240,26 @@ class DatasetDevice:
         self.label_key = label_key
         self.benign_labels = set(x.upper() for x in (benign_labels or ["BENIGN", "NORMAL"]))
         self.default_attacked = default_attacked
-        self.theta = 3.0  # Default threshold (will be calibrated per-device)
-        self.calibrated_theta = None  # Per-device theta from benign baseline
+        self.theta = theta  # Default (fixed) threshold, identical for every device
+        self.calibrated_theta = None  # Per-device theta from benign baseline (frozen once set)
         self.history = deque(maxlen=300)  # Extended to 5 min for slow drift detection
         self.attacked = False
         self.quarantine = False
         self.intensity = 0.0
         self.current = {k: 0.0 for k in self.feature_names}
         self.baseline = None
+        # If set, this device adopts its sibling's (benign) baseline instead of
+        # self-computing one from its own traffic. Attack-only CSVs have no
+        # benign rows to baseline against, so self-computing would compare
+        # attack traffic against a baseline built from that same attack traffic.
+        self.baseline_source = baseline_source
         self.drift_history = deque(maxlen=200)  # Track drift for calibration
 
         self._csv_file = None
         self._reader = None
         self._finished = False
         self.index = 0
+        self._burn_in_remaining = self.BURN_IN_ROWS
 
     def _ensure_reader(self):
         if self._reader is not None:
@@ -277,6 +295,24 @@ class DatasetDevice:
                     return
 
         self.index += 1
+
+        # Burn-in: discard the first BURN_IN_ROWS rows of every CSV (benign and
+        # attack alike) before they can enter history/baseline/evaluation, since
+        # the decay-based Kitsune features (esp. L0.1/L0.01) are still
+        # converging from a cold start at the beginning of any capture. Applied
+        # uniformly regardless of label so it cannot bias TPR/FPR in either
+        # direction.
+        if self._burn_in_remaining > 0:
+            self._burn_in_remaining -= 1
+            label = None
+            if self.label_key and self.label_key in row:
+                label = str(row.get(self.label_key, "")).strip().upper()
+            if label:
+                self.attacked = label not in self.benign_labels
+            elif self.default_attacked is not None:
+                self.attacked = bool(self.default_attacked)
+            return
+
         values = []
         for key in self.feature_names:
             value = _to_float(row.get(key, 0.0))
@@ -296,9 +332,29 @@ class DatasetDevice:
         import math
         self.history.append(values)
 
-        if self.baseline is None and len(self.history) >= 120:
-            self.baseline = self._compute_baseline(list(self.history)[:100])
-        
+        if self.baseline is None:
+            if self.baseline_source is not None:
+                if self.baseline_source.baseline is not None:
+                    self.baseline = self.baseline_source.baseline
+            elif len(self.history) >= 300:
+                # Use the full 300-row (deque maxlen) baseline window rather
+                # than 120. Several features (e.g. HH_*_radius) are near-zero
+                # most of the time with rare natural bursts; a 120-row sample
+                # can easily miss any burst in the baseline slice while a test
+                # slice happens to catch one, producing a spuriously huge
+                # z-score that is really just baseline under-sampling, not an
+                # anomaly. A larger baseline sample is the correct fix (more
+                # representative population variance) rather than a wider
+                # floor or capped z, which would hide real anomalies too.
+                self.baseline = self._compute_baseline(list(self.history)[:300])
+
+        # Per-device theta calibration, benign devices only (attack profiles
+        # are attack-contaminated and not a valid calibration source). Frozen
+        # after the first successful computation -- see calibrate_theta() --
+        # and shared with any attack sibling reusing this device's baseline,
+        # so both are evaluated against an identical threshold instead of the
+        # benign device silently getting a more lenient, continuously
+        # self-adjusting one (see calibrate_theta docstring).
         if self.baseline is not None and not self.default_attacked:
             self.calibrate_theta()
 
@@ -317,7 +373,7 @@ class DatasetDevice:
         return baseline
 
     def state(self):
-        if len(self.history) < 120:
+        if len(self.history) < 300:
             return None
 
         if self.baseline is None:
@@ -329,9 +385,9 @@ class DatasetDevice:
         zs = []
         for i, (mean, sigma) in enumerate(self.baseline):
             tv = [t[i] for t in test]
-            obs_mean = sum(tv) / len(tv)
-            baseline_sd = max(abs(mean) * 0.001, 1.0)
-            z = (obs_mean - mean) / baseline_sd
+            n = len(tv)
+            obs_mean = sum(tv) / n
+            z = (obs_mean - mean) / sigma
             zs.append(min(max(z, -100), 100))
 
         abs_zs = [abs(z) for z in zs]
@@ -348,14 +404,31 @@ class DatasetDevice:
         # Store drift for calibration
         self.drift_history.append(drift)
         
-        # Use per-device calibrated theta if available
-        effective_theta = self.calibrated_theta if self.calibrated_theta else self.theta
+        # Use the (frozen) calibrated theta if available. Attack devices don't
+        # calibrate their own theta (see tick()), but if their baseline_source
+        # (benign sibling) has calibrated one, they must be judged against
+        # that same value -- not the generic self.theta default -- otherwise
+        # benign and attack profiles from the same physical device would be
+        # scored against two different thresholds, which is exactly the
+        # asymmetry that was inflating TPR/FPR.
+        effective_theta = (
+            self.calibrated_theta
+            or (self.baseline_source.calibrated_theta if self.baseline_source else None)
+            or self.theta
+        )
         trust = max(0, int(100 - ((drift / effective_theta) ** 2.2) * 20))
 
-        # Quarantine management: only allow manual quarantine for dataset mode
-        # Skip auto-quarantine for continuous data stream monitoring
-        # This prevents false positives on initial calibration phase
-        if self.quarantine and trust > 75:
+        # Quarantine management, matching the documented spec (trust < 30 ->
+        # quarantine on, trust > 70 -> quarantine off). The auto-quarantine-on
+        # transition was previously missing here entirely for DatasetDevice --
+        # only the release side existed -- so `quarantine` never became True
+        # from the tick loop itself and any evaluation harness keyed off
+        # `state["quarantine"]` (rather than `state["alert"]`) would silently
+        # report zero detections. Restored to match engine.Device and the
+        # documented 30/70 hysteresis thresholds.
+        if trust < 30 and not self.quarantine:
+            self.quarantine = True
+        elif self.quarantine and trust > 70:
             self.quarantine = False
 
         explanation = "Dataset-derived behavioral profile is nominal."
@@ -383,12 +456,26 @@ class DatasetDevice:
 
     def calibrate_theta(self):
         """
-        For benign devices, compute 99th percentile of drift as the device's theta.
-        Call this after baseline is established and device has stabilized.
+        For benign devices, compute the 99th percentile of drift as the
+        device's theta, once baseline is established and enough drift samples
+        have accumulated.
+
+        IMPORTANT: this is computed exactly once and then frozen. Previously
+        this ran on every tick against a sliding window of the most recent
+        drift values, so the threshold kept re-adjusting upward to absorb
+        whatever drift the benign device was *currently* producing -- which
+        guarantees a low false-positive rate by construction rather than by
+        genuine calibration, and does so only for benign devices (attack
+        siblings kept using the fixed self.theta=3.0), an unfair asymmetry
+        that inflates both reported TPR and FPR. Freezing it after the first
+        computation, and sharing the frozen value with attack siblings (see
+        state()), fixes both problems.
         """
+        if self.calibrated_theta is not None:
+            return  # already frozen
         if len(self.drift_history) < 50:
             return  # Need enough data
-        
+
         sorted_drifts = sorted(list(self.drift_history))
         percentile_idx = int(len(sorted_drifts) * 0.99)
         self.calibrated_theta = max(1.0, sorted_drifts[percentile_idx] * 1.5)
@@ -467,13 +554,19 @@ def create_dataset_devices(dataset_path, dataset_name="n_baiot"):
             name_counts[readable_name] = 1
 
         default_attacked = "benign" not in base_name.lower()
-        devices.append(
-            DatasetDevice(
-                readable_name,
-                feature_names,
-                row_file_path=csv_path,
-                label_key="label",
-                default_attacked=default_attacked
-            )
+        dev = DatasetDevice(
+            readable_name,
+            feature_names,
+            row_file_path=csv_path,
+            label_key="label",
+            default_attacked=default_attacked
         )
+        dev._physical_device_id = device_id  # used below to link siblings to their benign baseline
+        devices.append(dev)
+
+    benign_by_device = {d._physical_device_id: d for d in devices if not d.default_attacked}
+    for d in devices:
+        if d.default_attacked and d._physical_device_id in benign_by_device:
+            d.baseline_source = benign_by_device[d._physical_device_id]
+
     return devices

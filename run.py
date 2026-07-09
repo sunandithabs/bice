@@ -24,7 +24,7 @@ def main():
 
     os.environ.setdefault("BICE_DATASET_NAME", "n_baiot")
 
-    os.execv(sys.executable, [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", args.port])
+    os.execv(sys.executable, [sys.executable, "-m", "uvicorn", "engine.main:app", "--host", "0.0.0.0", "--port", args.port])
 
 
 if __name__ == "__main__":

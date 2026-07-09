@@ -1,91 +1,108 @@
-# Detection of IoT Botnet Attacks 
-## N-BaIoT dataset
+# BICE — Behavioral Identity Continuity Engine
 
-## Abstract:
+BICE is a per-device behavioral anomaly detection framework for IoT networks.
+It maintains a running statistical baseline per device (Welford online mean/variance)
+and raises an alert when observed behavior drifts beyond a per-device Z-score
+threshold, without requiring any labeled attack traffic.
 
-This dataset addresses the lack of public botnet datasets, especially for the IoT. It suggests *real* traffic data, gathered from 9 commercial IoT devices authentically infected by Mirai and BASHLITE.
+Evaluated on the [N-BaIoT dataset](docs/DATASET.md) across 89 behavioral profiles
+from 9 physical IoT devices. See [`docs/IEEE_EVALUATION_REPORT.md`](docs/IEEE_EVALUATION_REPORT.md)
+for full methodology and results.
 
-## Dataset Characteristics:  
+## Requirements
 
-* Multivariate, Sequential
-* Number of Instances: 7062606
-* Area: Computer Attribute Characteristics:
-* Real Number of Attributes: 115
-* Date Donated: 2018-03-19
-* Associated Tasks: Classification, Clustering
-* Missing Values: N/A
+- Python 3.10+
+- See `requirements.txt`
 
+## Setup
 
-## Source:
-
-#### URL:
-http://archive.ics.uci.edu/ml/datasets/detection_of_IoT_botnet_attacks_N_BaIoT
-
-#### Creators:
-* Yair Meidan
-* Michael Bohadana
-* Yael Mathov
-* Yisroel Mirsky
-* Dominik Breitenbacher
-* Asaf Shabtai
-* Yuval Elovici
-
-
-### Dataset Information:
-
-##### Attribute being predicted:
-* Originally we aimed at distinguishing between benign and Malicious traffic data by means of anomaly detection techniques.
-* However, as the malicious data can be divided into 10 attacks carried by 2 botnets, the dataset can also be used for multi-class classification: 10 classes of attacks, plus 1 class of 'benign'.
-
-##### The study's results:
-* For each of the 9 IoT devices we trained and optimized a deep autoencoder on 2/3 of its benign data (i.e., the training set of each device). This was done to capture normal network traffic patterns.
-* The test data of each device comprised of the remaining 1/3 of benign data plus all the malicious data. On each test set we applied the respective trained (deep) autoencoder as an anomaly detector. The detection of anomalies (i.e., the cyberattacks launched from each of the above IoT devices) concluded with 100% TPR.
-
-
-### Attribute Information:
-
-The following describes each of the features headers:
-##### Stream aggregation:
-__H:__ Stats summarizing the recent traffic from this packet's host (IP)<br>
-__HH:__ Stats summarizing the recent traffic going from this packet's host (IP) to the packet's destination host.<br>
-__HpHp:__ Stats summarizing the recent traffic going from this packet's host+port (IP) to the packet's destination host+port. Example 192.168.4.2:1242 -> 192.168.4.12:80<br>
-__HH_jit:__ Stats summarizing the jitter of the traffic going from this packet's host (IP) to the packet's destination host.
-
-##### Time-frame (The decay factor Lambda used in the damped window):
-How much recent history of the stream is capture in these statistics
-L5, L3, L1, ...
-
-##### The statistics extracted from the packet stream:
-__weight:__ The weight of the stream (can be viewed as the number of items observed in recent history)<br>
-__mean:__ ...<br>
-__std:__ ...<br>
-__radius:__ The root squared sum of the two streams' variances<br>
-__magnitude:__ The root squared sum of the two streams' means<br>
-__cov:__ an approximated covariance between two streams<br>
-__pcc:__ an approximated covariance between two streams<br>
-
-### Citation Policy
-
-http://archive.ics.uci.edu/ml/citation_policy.html
-
-```
-@misc{Dua:2019 ,
-author = "Dua, Dheeru and Graff, Casey",
-year = "2017",
-title = "{UCI} Machine Learning Repository",
-url = "http://archive.ics.uci.edu/ml",
-institution = "University of California, Irvine, School of Information and Computer Sciences" }
+```bash
+git clone <repo-url>
+cd bice
+pip install -r requirements.txt
 ```
 
-### Relevant Papers:
+## Running
 
-Reference to the article where the feature extractor (from *.pcap to *.csv) was described:<br>
+From the project root (this directory, the one containing `run.py`):
 
-__Y. Mirsky, T. Doitshman, Y. Elovici & A. Shabtai__, 'Kitsune: An Ensemble of Autoencoders for Online Network Intrusion Detection', in Network and Distributed System Security (NDSS) Symposium, San Diego (2018), CA, USA.
+```bash
+python run.py --dataset /path/to/n-baiot-folder
+```
 
+Leave `--dataset` empty to run a synthetic simulation instead of the real dataset.
+Once running, the dashboard is served at `http://localhost:8000`.
 
+Alternatively, set the dataset path via environment variable and launch uvicorn directly:
 
-### Citation Request:
+```bash
+BICE_DATASET_PATH=/path/to/n-baiot-folder python -m uvicorn engine.main:app --port 8000
+```
 
-Reference to the article where the dataset was initially described and used:<br>
-__Y. Meidan, M. Bohadana, Y. Mathov, Y. Mirsky, D. Breitenbacher,__ A. Shabtai, and Y. Elovici 'N-BaIoT: Network-based Detection of IoT Botnet Attacks Using Deep Autoencoders', IEEE Pervasive Computing, Special Issue - Securing the IoT (July/Sep 2018).
+## Evaluation
+
+`test_metrics.py` polls a running server and reports drift/trust statistics
+once all device baselines are ready. `scripts/run_eval.sh` automates a full
+start-server → wait-for-baseline → collect-metrics run:
+
+```bash
+BICE_DATASET_PATH=/path/to/n-baiot-folder ./scripts/run_eval.sh
+```
+
+For offline evaluation (no server needed) against real N-BaIoT data:
+
+```bash
+python3 scripts/full_evaluation.py            # classification metrics, runtime, ablation study
+python3 scripts/baseline_comparison.py --dataset /path/to/n-baiot-folder
+```
+
+If `results/synthetic_nbaiot/` doesn't exist yet, `full_evaluation.py`
+generates a deterministic (seed=42) synthetic stand-in dataset first — the
+real N-BaIoT dataset is hosted at archive.ics.uci.edu; point
+`scripts/full_evaluation.py`'s `DATASET_DIR` (or `baseline_comparison.py
+--dataset`) at a real download to evaluate on it instead. See
+[`docs/IEEE_EVALUATION_REPORT.md`](docs/IEEE_EVALUATION_REPORT.md) §2.3 and
+§3 for full methodology, parameters, and results, and
+`results/full_evaluation.json` for raw output.
+
+## Project structure
+
+```
+bice/
+├── run.py                  # CLI entry point, launches uvicorn
+├── requirements.txt
+├── engine/
+│   ├── main.py              # FastAPI app, telemetry loop, API routes
+│   ├── engine.py             # Device model, drift/trust scoring
+│   ├── dataset.py            # N-BaIoT CSV loading, DatasetDevice
+│   ├── evaluate.py           # Scenario-based evaluation harness
+│   └── evaluate_optimizations.py
+├── dashboard/
+│   └── index.html            # Live monitoring dashboard (served at "/")
+├── scripts/
+│   ├── run_eval.sh           # End-to-end evaluation runner (live server)
+│   ├── full_evaluation.py    # Offline: classification metrics, runtime, ablation study
+│   ├── generate_synthetic_dataset.py  # Deterministic N-BaIoT-format stand-in dataset
+│   └── baseline_comparison.py # BICE vs IsolationForest/OC-SVM, theta sweep
+├── sample_dataset.py         # Utility: sample a subset of the raw N-BaIoT CSVs
+├── test_metrics.py           # Polls a running server, prints summary stats
+└── docs/
+    ├── DATASET.md             # N-BaIoT dataset description
+    └── IEEE_EVALUATION_REPORT.md
+```
+
+## API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | GET | Dashboard UI |
+| `/api/state` | GET | Current per-device drift/trust/alert state |
+| `/api/calibration` | GET | Theta calibration log |
+| `/api/export` | GET | Export telemetry as CSV/JSON |
+| `/api/attack/{name}` | POST | Toggle simulated attack (synthetic mode only) |
+| `/api/quarantine/{name}` | POST | Toggle manual quarantine |
+| `/api/reset` | POST | Reset all device state for a clean re-run |
+
+## License
+
+MIT — see [LICENSE](LICENSE).

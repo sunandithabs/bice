@@ -1,13 +1,13 @@
-import asyncio, random, math, sqlite3, json
+import asyncio, random, math, sqlite3, json, os
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
 import io
-from engine import devices, device_map, DATASET_MODE
+from engine.engine import devices, device_map, DATASET_MODE
 
 try:
-    from dataset import cleanup_dataset_dirs
+    from engine.dataset import cleanup_dataset_dirs
 except ImportError:
     def cleanup_dataset_dirs():
         pass
@@ -15,6 +15,7 @@ except ImportError:
 DB_PATH = "results/bice.db"
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS telemetry (
@@ -109,8 +110,10 @@ async def lifespan(_):
 
 app = FastAPI(lifespan=lifespan)
 
+DASHBOARD_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard", "index.html")
+
 @app.get("/")
-def index(): return FileResponse("index.html")
+def index(): return FileResponse(DASHBOARD_PATH)
 
 @app.get("/api/calibration")
 def get_calibration():

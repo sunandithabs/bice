@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Run this AFTER server is already up:
-#   BICE_DATASET_PATH=/home/smtx724/Downloads/archive_mini python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+# Run this AFTER server is already up (from the project root):
+#   BICE_DATASET_PATH=/path/to/archive_mini python3 -m uvicorn engine.main:app --host 0.0.0.0 --port 8000
 
 import sys
 import time

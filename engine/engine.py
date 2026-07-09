@@ -7,7 +7,7 @@ DATASET_NAME = os.getenv("BICE_DATASET_NAME", "n_baiot").lower()
 
 try:
     if DATASET_PATH:
-        from dataset import create_dataset_devices
+        from engine.dataset import create_dataset_devices
         devices = create_dataset_devices(DATASET_PATH, DATASET_NAME)
     else:
         devices = None

@@ -18,7 +18,7 @@ import os
 import sys
 
 
-def sample(src_dir, dst_dir, rows_per_file):
+def sample(src_dir, dst_dir, rows_per_file, skip_rows=0):
     if not os.path.isdir(src_dir):
         print(f"ERROR: source folder not found: {src_dir}")
         sys.exit(1)
@@ -53,8 +53,12 @@ def sample(src_dir, dst_dir, rows_per_file):
             writer = csv.DictWriter(fout, fieldnames=reader.fieldnames)
             writer.writeheader()
 
+            skipped = 0
             count = 0
             for row in reader:
+                if skipped < skip_rows:
+                    skipped += 1
+                    continue
                 writer.writerow(row)
                 count += 1
                 if count >= rows_per_file:
@@ -75,10 +79,23 @@ if __name__ == "__main__":
     parser.add_argument("--src", required=True, help="Source dataset folder")
     parser.add_argument("--dst", required=True, help="Output folder for sampled CSVs")
     parser.add_argument("--rows", type=int, default=500, help="Rows per file (default 500)")
+    parser.add_argument(
+        "--skip", type=int, default=60,
+        help=(
+            "Burn-in rows discarded from the start of each CSV before sampling begins "
+            "(default 1000). N-BaIoT's decay-based Kitsune features (esp. L0.1/L0.01) "
+            "start at zero and are still converging in the first rows of any capture. "
+            "Without this, taking 'the first N rows' of every file -- benign and attack "
+            "alike -- samples exactly that cold-start transient rather than steady-state "
+            "behavior, which the engine (engine/dataset.py DatasetDevice.BURN_IN_ROWS) "
+            "also discards independently as defense-in-depth."
+        ),
+    )
     args = parser.parse_args()
 
     sample(
         os.path.expanduser(args.src),
         os.path.expanduser(args.dst),
         args.rows,
+        skip_rows=args.skip,
     )

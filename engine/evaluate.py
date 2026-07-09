@@ -1,6 +1,8 @@
-import time, copy
-from engine import Device, devices
-from dataset import DatasetDevice
+import time, copy, random, resource
+from engine.engine import Device, devices
+from engine.dataset import DatasetDevice
+
+EVAL_TICKS = 240  # 120-tick baseline + 120-tick evaluation window, per paper methodology
 
 def run_test_scenario(device_template, name):
     # Clone the device to avoid modifying global state
@@ -17,13 +19,16 @@ def run_test_scenario(device_template, name):
     }
 
     print(f"[TEST] Evaluating {name}...")
+    tick_latencies_ms = []
 
     if isinstance(d, DatasetDevice):
-        duration = len(d.rows)
+        duration = EVAL_TICKS
         for i in range(duration):
             metrics["ticks"] += 1
+            t0 = time.perf_counter()
             d.tick()
             s = d.state()
+            tick_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
             if s and i >= metrics["warmup"]:
                 metrics["trust_history"].append(s["trust"])
@@ -39,8 +44,10 @@ def run_test_scenario(device_template, name):
             metrics["ticks"] += 1
             if i == metrics["attack_start"]:
                 d.attacked = True
+            t0 = time.perf_counter()
             d.tick()
             s = d.state()
+            tick_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
             if s:
                 if i < metrics["warmup"]:
@@ -64,10 +71,14 @@ def run_test_scenario(device_template, name):
         "quarantine_delay": quarantine_delay,
         "avg_noise": round(avg_noise, 3),
         "final_trust": final_trust,
-        "explanation": s["explanation"] if s else "N/A"
+        "explanation": s["explanation"] if s else "N/A",
+        "mean_tick_ms": round(sum(tick_latencies_ms) / len(tick_latencies_ms), 4) if tick_latencies_ms else 0,
+        "p95_tick_ms": round(sorted(tick_latencies_ms)[int(len(tick_latencies_ms) * 0.95)], 4) if tick_latencies_ms else 0,
     }
 
 if __name__ == "__main__":
+    random.seed(42)  # deterministic run: engine.Device's synthetic simulation
+    # (used when no dataset is configured) draws from random.gauss() per tick.
     print("-" * 60)
     print(" BICE PERFORMANCE EVALUATION REPORT ")
     print(" Target: Behavioral Identity Continuity Engine v1.0")
@@ -92,4 +103,11 @@ if __name__ == "__main__":
     print(f"Average Detection Latency: {avg_lat:.2f} ticks")
     print(f"System reached 100% detection rate for all injected vectors.")
     print("Model remains stable under nominal noise (Avg Noise Floor < 1.0 Δ).")
+
+    print("\n[RUNTIME]")
+    avg_tick = sum(r["mean_tick_ms"] for r in results) / len(results)
+    max_p95 = max(r["p95_tick_ms"] for r in results)
+    print(f"Mean tick+state latency across devices: {avg_tick:.4f} ms  (max p95: {max_p95:.4f} ms)")
+    print(f"Process peak RSS: {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss} KB")
+    print(f"Random seed: 42 (deterministic)")
     print("-" * 60)
